@@ -107,37 +107,27 @@ def _migrate_legacy_contact_addresses() -> None:
     if not all(column in contact_cols for column in _LEGACY_ADDRESS_COLUMNS):
         return
 
+    nonempty = " OR ".join(f"c.{column} IS NOT NULL" for column in _LEGACY_ADDRESS_COLUMNS)
     with engine.begin() as connection:
-        already_moved = {
-            row[0]
-            for row in connection.execute(text("SELECT DISTINCT contact_id FROM addresses"))
-        }
-        rows = connection.execute(
-            text("SELECT id, address, city, state, postal_code, country FROM contacts")
-        ).mappings()
-        for row in rows:
-            if row["id"] in already_moved:
-                continue
-            if not any(row[column] for column in _LEGACY_ADDRESS_COLUMNS):
-                continue
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO addresses
-                        (contact_id, type, address, city, state, postal_code, country)
-                    VALUES
-                        (:contact_id, 'home', :address, :city, :state, :postal_code, :country)
-                    """
-                ),
-                {
-                    "contact_id": row["id"],
-                    "address": row["address"],
-                    "city": row["city"],
-                    "state": row["state"],
-                    "postal_code": row["postal_code"],
-                    "country": row["country"],
-                },
+        if engine.dialect.name == "postgresql":
+            # Serialize multi-worker startups so two processes cannot both
+            # observe "no address rows yet" and insert duplicates.
+            connection.execute(text("SELECT pg_advisory_xact_lock(87451293)"))
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO addresses
+                    (contact_id, type, address, city, state, postal_code, country)
+                SELECT
+                    c.id, 'home', c.address, c.city, c.state, c.postal_code, c.country
+                FROM contacts c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM addresses a WHERE a.contact_id = c.id
+                )
+                AND ({nonempty})
+                """
             )
+        )
 
 
 def get_db() -> Generator[Session, None, None]:
