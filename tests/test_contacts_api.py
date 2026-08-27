@@ -1,5 +1,9 @@
 import base64
 
+from sqlalchemy import func, select
+
+from app.database import SessionLocal
+from app.models import Address
 from app.photo import MAX_PHOTO_BYTES
 
 BASE = "/api/v1/contacts"
@@ -133,6 +137,7 @@ def test_put_replaces_contact(client, payload):
     body = response.json()
     assert body["full_name"] == "Grace Hopper"
     assert body["company"] is None  # omitted fields are cleared by PUT
+    assert body["addresses"] == []
 
 
 def test_put_missing_contact_returns_404(client):
@@ -247,6 +252,7 @@ def test_init_db_adds_photo_column_to_existing_table(client):
     from app.database import engine, init_db
 
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS addresses"))
         connection.execute(text("DROP TABLE contacts"))
         connection.execute(
             text(
@@ -271,3 +277,83 @@ def test_init_db_adds_photo_column_to_existing_table(client):
     columns = {column["name"] for column in inspector.get_columns("contacts")}
     assert "photo" in columns
     assert client.get("/health").status_code == 200
+
+
+def test_create_contact_stores_multiple_addresses(client, payload):
+    work = {
+        "type": "work",
+        "address": "1 Market St, Suite 400",
+        "city": "San Francisco",
+        "state": "CA",
+        "postal_code": "94105",
+        "country": "USA",
+    }
+    response = client.post(BASE, json={**payload, "addresses": [payload["addresses"][0], work]})
+    assert response.status_code == 201
+    addresses = response.json()["addresses"]
+    assert [row["type"] for row in addresses] == ["home", "work"]
+    assert addresses[0]["city"] == "San Francisco"
+    assert addresses[1]["address"] == work["address"]
+    assert all(row["id"] > 0 for row in addresses)
+
+
+def test_create_rejects_unknown_address_type(client, payload):
+    response = client.post(
+        BASE,
+        json={**payload, "addresses": [{"type": "vacation", "city": "Tahoe"}]},
+    )
+    assert response.status_code == 422
+
+
+def test_create_rejects_too_many_addresses(client, payload):
+    too_many = [{"type": "other", "city": f"City {index}"} for index in range(21)]
+    response = client.post(BASE, json={**payload, "addresses": too_many})
+    assert response.status_code == 422
+
+
+def test_patch_omitting_addresses_keeps_them(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    response = client.patch(f"{BASE}/{contact_id}", json={"phone": "+1-000-000-0000"})
+    assert response.status_code == 200
+    addresses = response.json()["addresses"]
+    assert len(addresses) == 1
+    assert addresses[0]["type"] == "home"
+    assert addresses[0]["city"] == "San Francisco"
+
+
+def test_patch_empty_addresses_clears_them(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    response = client.patch(f"{BASE}/{contact_id}", json={"addresses": []})
+    assert response.status_code == 200
+    assert response.json()["addresses"] == []
+
+
+def test_put_replaces_addresses(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    response = client.put(
+        f"{BASE}/{contact_id}",
+        json={
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.com",
+            "addresses": [
+                {"type": "work", "city": "London", "country": "UK"},
+                {"type": "other", "address": "Hut 8", "city": "Bletchley"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    addresses = response.json()["addresses"]
+    assert [row["type"] for row in addresses] == ["work", "other"]
+    assert addresses[0]["city"] == "London"
+
+
+def test_delete_contact_cascades_addresses(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    with SessionLocal() as db:
+        assert db.execute(select(func.count()).select_from(Address)).scalar_one() == 1
+
+    assert client.delete(f"{BASE}/{contact_id}").status_code == 204
+
+    with SessionLocal() as db:
+        assert db.execute(select(func.count()).select_from(Address)).scalar_one() == 0
