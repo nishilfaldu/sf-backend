@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -18,6 +20,9 @@ def _with_addresses():
 def _set_addresses(contact: Contact, rows: list[AddressWrite]) -> None:
     contact.addresses.clear()
     contact.addresses.extend(Address(**row.model_dump()) for row in rows)
+    # Child-table writes do not dirty Contact columns, so bump updated_at
+    # ourselves for address-only PUT/PATCH.
+    contact.updated_at = datetime.now(timezone.utc)
 
 
 def get_contact(db: Session, contact_id: int) -> Contact | None:

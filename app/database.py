@@ -56,6 +56,7 @@ def init_db() -> None:
     # from the mapped column so file-backed SQLite/Postgres from before this
     # field keep working.
     _add_missing_column(Contact.__table__, "photo")
+    _migrate_legacy_contact_addresses()
 
 
 def _add_missing_column(table: Table, column_name: str) -> None:
@@ -85,6 +86,58 @@ def _add_missing_column(table: Table, column_name: str) -> None:
         if column_name not in existing:
             raise
     inspector.clear_cache()
+
+
+_LEGACY_ADDRESS_COLUMNS = ("address", "city", "state", "postal_code", "country")
+
+
+def _migrate_legacy_contact_addresses() -> None:
+    """Copy a pre-existing single address off `contacts` into `addresses`.
+
+    `create_all` adds the new table but leaves leftover columns on an older
+    `contacts` table. One `home` row per contact that had any postal field set.
+    Contacts that already have address rows are left alone.
+    """
+    inspector = inspect(engine)
+    inspector.clear_cache()
+    tables = inspector.get_table_names()
+    if "contacts" not in tables or "addresses" not in tables:
+        return
+    contact_cols = {column["name"] for column in inspector.get_columns("contacts")}
+    if not all(column in contact_cols for column in _LEGACY_ADDRESS_COLUMNS):
+        return
+
+    with engine.begin() as connection:
+        already_moved = {
+            row[0]
+            for row in connection.execute(text("SELECT DISTINCT contact_id FROM addresses"))
+        }
+        rows = connection.execute(
+            text("SELECT id, address, city, state, postal_code, country FROM contacts")
+        ).mappings()
+        for row in rows:
+            if row["id"] in already_moved:
+                continue
+            if not any(row[column] for column in _LEGACY_ADDRESS_COLUMNS):
+                continue
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO addresses
+                        (contact_id, type, address, city, state, postal_code, country)
+                    VALUES
+                        (:contact_id, 'home', :address, :city, :state, :postal_code, :country)
+                    """
+                ),
+                {
+                    "contact_id": row["id"],
+                    "address": row["address"],
+                    "city": row["city"],
+                    "state": row["state"],
+                    "postal_code": row["postal_code"],
+                    "country": row["country"],
+                },
+            )
 
 
 def get_db() -> Generator[Session, None, None]:

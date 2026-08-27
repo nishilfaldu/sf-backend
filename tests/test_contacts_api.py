@@ -279,6 +279,70 @@ def test_init_db_adds_photo_column_to_existing_table(client):
     assert client.get("/health").status_code == 200
 
 
+def test_init_db_copies_legacy_contact_addresses(client):
+    from sqlalchemy import text
+
+    from app.database import engine, init_db
+
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS addresses"))
+        connection.execute(text("DROP TABLE contacts"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE contacts (
+                    id INTEGER PRIMARY KEY,
+                    first_name VARCHAR(100) NOT NULL,
+                    last_name VARCHAR(100) NOT NULL,
+                    email VARCHAR(320) NOT NULL,
+                    phone VARCHAR(40),
+                    company VARCHAR(200),
+                    job_title VARCHAR(200),
+                    address VARCHAR(300),
+                    city VARCHAR(120),
+                    state VARCHAR(120),
+                    postal_code VARCHAR(20),
+                    country VARCHAR(120),
+                    notes TEXT,
+                    photo TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO contacts
+                    (id, first_name, last_name, email, city, state, country)
+                VALUES
+                    (1, 'Ada', 'Lovelace', 'ada@example.com', 'San Francisco', 'CA', 'USA'),
+                    (2, 'Grace', 'Hopper', 'grace@example.com', NULL, NULL, NULL)
+                """
+            )
+        )
+
+    init_db()
+    init_db()
+
+    ada = client.get(f"{BASE}/1").json()
+    assert ada["addresses"] == [
+        {
+            "id": ada["addresses"][0]["id"],
+            "type": "home",
+            "address": None,
+            "city": "San Francisco",
+            "state": "CA",
+            "postal_code": None,
+            "country": "USA",
+        }
+    ]
+    grace = client.get(f"{BASE}/2").json()
+    assert grace["addresses"] == []
+    assert client.get("/health").json()["contacts"] == 2
+
+
 def test_create_contact_stores_multiple_addresses(client, payload):
     work = {
         "type": "work",
@@ -328,8 +392,20 @@ def test_patch_empty_addresses_clears_them(client, payload):
     assert response.json()["addresses"] == []
 
 
+def test_patch_addresses_only_bumps_updated_at(client, payload):
+    created = client.post(BASE, json=payload).json()
+    response = client.patch(
+        f"{BASE}/{created['id']}",
+        json={"addresses": [{"type": "work", "city": "London", "country": "UK"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["updated_at"] != created["updated_at"]
+    assert response.json()["addresses"][0]["city"] == "London"
+
+
 def test_put_replaces_addresses(client, payload):
-    contact_id = client.post(BASE, json=payload).json()["id"]
+    created = client.post(BASE, json=payload).json()
+    contact_id = created["id"]
     response = client.put(
         f"{BASE}/{contact_id}",
         json={
@@ -346,6 +422,7 @@ def test_put_replaces_addresses(client, payload):
     addresses = response.json()["addresses"]
     assert [row["type"] for row in addresses] == ["work", "other"]
     assert addresses[0]["city"] == "London"
+    assert response.json()["updated_at"] != created["updated_at"]
 
 
 def test_delete_contact_cascades_addresses(client, payload):
