@@ -1,7 +1,8 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import Table, create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -46,29 +47,43 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
 
 
 def init_db() -> None:
-    """Create tables. Called on startup; safe to call repeatedly."""
+    """Create tables and upgrade existing ones. Safe to call repeatedly."""
     from app import models  # noqa: F401  (register models on Base.metadata)
+    from app.models import Contact
 
     Base.metadata.create_all(bind=engine)
-    _ensure_photo_column()
+    # create_all will not ALTER a pre-existing `contacts` table. Add `photo`
+    # from the mapped column so file-backed SQLite/Postgres from before this
+    # field keep working.
+    _add_missing_column(Contact.__table__, "photo")
 
 
-def _ensure_photo_column() -> None:
-    """Add `contacts.photo` when a pre-existing table was created without it.
-
-    `create_all` only creates missing tables. File-backed SQLite and Postgres
-    keep the old `contacts` shape across restarts, so ORM reads would fail
-    without this ALTER.
-    """
+def _add_missing_column(table: Table, column_name: str) -> None:
     inspector = inspect(engine)
     inspector.clear_cache()
-    if "contacts" not in inspector.get_table_names():
+    if table.name not in inspector.get_table_names():
         return
-    existing = {column["name"] for column in inspector.get_columns("contacts")}
-    if "photo" in existing:
+    existing = {column["name"] for column in inspector.get_columns(table.name)}
+    if column_name in existing:
         return
-    with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE contacts ADD COLUMN photo TEXT"))
+
+    column = table.c[column_name]
+    type_sql = column.type.compile(dialect=engine.dialect)
+    if engine.dialect.name == "postgresql":
+        ddl = text(
+            f"ALTER TABLE {table.name} ADD COLUMN IF NOT EXISTS {column.name} {type_sql}"
+        )
+    else:
+        ddl = text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {type_sql}")
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(ddl)
+    except DBAPIError:
+        inspector.clear_cache()
+        existing = {column["name"] for column in inspector.get_columns(table.name)}
+        if column_name not in existing:
+            raise
     inspector.clear_cache()
 
 

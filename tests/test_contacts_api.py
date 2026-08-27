@@ -264,6 +264,7 @@ def test_init_db_adds_photo_column_to_existing_table(client):
     }
 
     init_db()
+    init_db()  # idempotent when the column is already present
 
     inspector = inspect(engine)
     inspector.clear_cache()

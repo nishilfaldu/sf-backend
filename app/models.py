@@ -30,6 +30,7 @@ class Contact(Base):
     country: Mapped[str | None] = mapped_column(String(120))
 
     notes: Mapped[str | None] = mapped_column(Text)
+    # Older file-backed DBs get this column from init_db → _add_missing_column.
     photo: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
