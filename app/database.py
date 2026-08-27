@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -50,6 +50,26 @@ def init_db() -> None:
     from app import models  # noqa: F401  (register models on Base.metadata)
 
     Base.metadata.create_all(bind=engine)
+    _ensure_photo_column()
+
+
+def _ensure_photo_column() -> None:
+    """Add `contacts.photo` when a pre-existing table was created without it.
+
+    `create_all` only creates missing tables. File-backed SQLite and Postgres
+    keep the old `contacts` shape across restarts, so ORM reads would fail
+    without this ALTER.
+    """
+    inspector = inspect(engine)
+    inspector.clear_cache()
+    if "contacts" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("contacts")}
+    if "photo" in existing:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE contacts ADD COLUMN photo TEXT"))
+    inspector.clear_cache()
 
 
 def get_db() -> Generator[Session, None, None]:
