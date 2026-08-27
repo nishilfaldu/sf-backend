@@ -282,6 +282,42 @@ class RootResponse(BaseModel):
     openapi: str = Field(description="Path to the OpenAPI 3.1 document.", examples=["/openapi.json"])
     contacts: str = Field(description="Base path of the contacts collection.", examples=["/api/v1/contacts"])
     health: str = Field(description="Path to the liveness probe.", examples=["/health"])
+    lan: str = Field(
+        description="LAN addresses other devices on the same Wi-Fi can use to reach this process.",
+        examples=["/api/v1/lan"],
+    )
+    shares: str = Field(
+        description="Look up a contact snapshot by its short-lived share token.",
+        examples=["/api/v1/shares/{token}"],
+    )
+
+
+class LanStatus(BaseModel):
+    """IPv4 addresses on this machine that peers on the same Wi-Fi can try."""
+
+    addresses: list[str] = Field(
+        description=(
+            "Non-loopback IPv4 addresses, Wi-Fi-style ranges first. Empty when this "
+            "host has no usable LAN interface (offline, or only loopback)."
+        ),
+        examples=[["192.168.1.42"]],
+    )
+    bind_host: str = Field(description="Address the API process is bound to.", examples=["127.0.0.1"])
+    bind_port: int = Field(description="Port the API process is bound to.", examples=[8000])
+
+
+class ShareCreated(BaseModel):
+    """A newly minted share token for one contact."""
+
+    token: str = Field(
+        description="Opaque token. Pass it to `GET /api/v1/shares/{token}` while it is still valid.",
+        examples=["aB3xY9_k"],
+    )
+    expires_at: datetime = Field(
+        description="UTC instant after which the token 404s. Shares last 30 minutes.",
+        examples=["2026-08-27T03:22:58.189507Z"],
+    )
+    contact_id: int = Field(description="Id of the contact that was snapshotted.", examples=[1])
 
 
 class ErrorResponse(BaseModel):

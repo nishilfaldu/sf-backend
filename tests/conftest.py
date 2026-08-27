@@ -10,10 +10,12 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, engine
 from app.main import app
+from app.shares import reset_shares
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
+    reset_shares()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as test_client:

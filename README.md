@@ -90,18 +90,31 @@ also read):
 | `CONTACTS_PORT` | `8000` | Bind port |
 | `CONTACTS_SQL_ECHO` | `false` | Log every SQL statement |
 
+People on the same Wi-Fi open the **Next.js** app in their phone browser
+(`http://<lan-ip>:3000`). They do not need this API port — the web server talks
+to `127.0.0.1:8000` on the host laptop. On startup the API logs every usable
+LAN address it finds. `POST /api/v1/contacts/{id}/share` mints a 30-minute
+snapshot token; guest Wi-Fi with client isolation will block device-to-device
+traffic.
+
 ## API
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/health` | Liveness + database check and contact count |
 | `GET` | `/` | Entry-point listing |
+| `GET` | `/api/v1/lan` | IPv4 addresses reachable on this Wi-Fi |
+| `GET` | `/api/v1/qr` | SVG QR code for a join or share URL |
 | `POST` | `/api/v1/contacts` | Create a contact → `201` |
 | `GET` | `/api/v1/contacts` | List with search, sort, pagination |
 | `GET` | `/api/v1/contacts/{id}` | Fetch one contact |
 | `PUT` | `/api/v1/contacts/{id}` | Full replace (omitted fields are cleared) |
 | `PATCH` | `/api/v1/contacts/{id}` | Partial update (only sent fields change) |
 | `DELETE` | `/api/v1/contacts/{id}` | Delete → `204` |
+| `POST` | `/api/v1/contacts/{id}/share` | Snapshot the contact into a 30-minute token |
+| `GET` | `/api/v1/contacts/{id}/vcard` | Download the contact as a `.vcf` |
+| `GET` | `/api/v1/shares/{token}` | Fetch a shared snapshot |
+| `GET` | `/api/v1/shares/{token}/vcard` | Download the snapshot as a `.vcf` |
 
 ### Contact fields
 
@@ -188,6 +201,11 @@ app/
   schemas.py          Pydantic request/response models
   crud.py             Database operations (search, sort, paginate)
   seed.py             Sample contacts for the in-memory default
+  lan.py              Detect LAN IPv4 addresses for Wi-Fi join
+  shares.py           In-memory 30-minute share tokens
+  vcard.py            vCard 3.0 export
+  qr.py               SVG QR codes
   routers/contacts.py REST endpoints
+  routers/shares.py   LAN, QR, share, and vCard endpoints
 tests/                API tests via FastAPI TestClient
 ```

@@ -11,7 +11,8 @@ from app import __version__
 from app.config import get_settings
 from app.crud import count_contacts
 from app.database import engine, get_db, init_db
-from app.routers import contacts
+from app.lan import lan_ipv4_addresses
+from app.routers import contacts, shares
 from app.schemas import HealthResponse, RootResponse
 from app.seed import seed_if_empty
 
@@ -52,7 +53,14 @@ TAGS_METADATA = [
     },
     {
         "name": "meta",
-        "description": "Service discovery and health checks. Useful for probes and smoke tests.",
+        "description": "Service discovery, health checks, and LAN join helpers.",
+    },
+    {
+        "name": "shares",
+        "description": (
+            "Short-lived tokens that hand a contact snapshot to someone on the "
+            "same Wi-Fi. Tokens live in this process for 30 minutes."
+        ),
     },
 ]
 
@@ -65,6 +73,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         added = seed_if_empty()
         if added:
             logger.info("seeded %d sample contacts", added)
+    for ip in lan_ipv4_addresses():
+        logger.info("Wi-Fi join: phones on this network can open http://%s:3000", ip)
     yield
     engine.dispose()
 
@@ -89,6 +99,7 @@ app.add_middleware(
 )
 
 app.include_router(contacts.router)
+app.include_router(shares.router)
 
 
 @app.get(
@@ -132,6 +143,8 @@ def root() -> RootResponse:
         openapi="/openapi.json",
         contacts="/api/v1/contacts",
         health="/health",
+        lan="/api/v1/lan",
+        shares="/api/v1/shares/{token}",
     )
 
 
