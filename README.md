@@ -110,8 +110,15 @@ also read):
 
 ```
 first_name, last_name, email, phone, company, job_title,
-address, city, state, postal_code, country, notes, photo
+notes, photo, addresses
 ```
+
+`addresses` is a list of `{type, address, city, state, postal_code, country}`
+objects stored in a separate `addresses` table (`contact_id` foreign key).
+`type` is `home`, `work`, or `other`. A contact may have up to 20. `PUT`
+replaces the whole list (omitting it clears every address); `PATCH` replaces
+the list only when `addresses` is sent (`[]` clears, omit keeps the current
+rows).
 
 `photo` is an optional `data:image/{jpeg,png,gif,webp};base64,...` URL.
 Decoded size must be 512 KB or smaller. Omit it, send `null`, or (on `PUT`)
@@ -177,7 +184,7 @@ app/
   main.py             FastAPI app, lifespan startup, /health and /
   config.py           Environment-driven settings
   database.py         Engine, session factory, StaticPool in-memory wiring
-  models.py           Contact ORM model
+  models.py           Contact and Address ORM models
   schemas.py          Pydantic request/response models
   crud.py             Database operations (search, sort, paginate)
   seed.py             Sample contacts for the in-memory default

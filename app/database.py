@@ -56,6 +56,7 @@ def init_db() -> None:
     # from the mapped column so file-backed SQLite/Postgres from before this
     # field keep working.
     _add_missing_column(Contact.__table__, "photo")
+    _migrate_legacy_contact_addresses()
 
 
 def _add_missing_column(table: Table, column_name: str) -> None:
@@ -85,6 +86,48 @@ def _add_missing_column(table: Table, column_name: str) -> None:
         if column_name not in existing:
             raise
     inspector.clear_cache()
+
+
+_LEGACY_ADDRESS_COLUMNS = ("address", "city", "state", "postal_code", "country")
+
+
+def _migrate_legacy_contact_addresses() -> None:
+    """Copy a pre-existing single address off `contacts` into `addresses`.
+
+    `create_all` adds the new table but leaves leftover columns on an older
+    `contacts` table. One `home` row per contact that had any postal field set.
+    Contacts that already have address rows are left alone.
+    """
+    inspector = inspect(engine)
+    inspector.clear_cache()
+    tables = inspector.get_table_names()
+    if "contacts" not in tables or "addresses" not in tables:
+        return
+    contact_cols = {column["name"] for column in inspector.get_columns("contacts")}
+    if not all(column in contact_cols for column in _LEGACY_ADDRESS_COLUMNS):
+        return
+
+    nonempty = " OR ".join(f"c.{column} IS NOT NULL" for column in _LEGACY_ADDRESS_COLUMNS)
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            # Serialize multi-worker startups so two processes cannot both
+            # observe "no address rows yet" and insert duplicates.
+            connection.execute(text("SELECT pg_advisory_xact_lock(87451293)"))
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO addresses
+                    (contact_id, type, address, city, state, postal_code, country)
+                SELECT
+                    c.id, 'home', c.address, c.city, c.state, c.postal_code, c.country
+                FROM contacts c
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM addresses a WHERE a.contact_id = c.id
+                )
+                AND ({nonempty})
+                """
+            )
+        )
 
 
 def get_db() -> Generator[Session, None, None]:

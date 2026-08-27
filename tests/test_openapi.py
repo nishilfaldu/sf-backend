@@ -132,6 +132,8 @@ def test_contact_fields_are_described_and_have_examples(spec):
         assert field.get("description"), f"ContactRead.{name} is missing a description"
     assert schema["properties"]["email"]["examples"] == ["ada@example.com"]
     assert schema["properties"]["full_name"]["description"]
+    assert "AddressRead" in spec["components"]["schemas"]
+    assert spec["components"]["schemas"]["ContactCreate"]["properties"]["addresses"]
 
 
 def test_request_bodies_carry_examples(spec):
