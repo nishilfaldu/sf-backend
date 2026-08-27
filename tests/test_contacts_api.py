@@ -1,4 +1,13 @@
+import base64
+
+from app.photo import MAX_PHOTO_BYTES
+
 BASE = "/api/v1/contacts"
+
+TINY_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 
 def test_health(client):
@@ -144,3 +153,76 @@ def test_delete_contact(client, payload):
 def test_root_lists_entrypoints(client):
     body = client.get("/").json()
     assert body["contacts"] == BASE
+
+
+def test_create_contact_without_photo_returns_null(client, payload):
+    body = client.post(BASE, json=payload).json()
+    assert body["photo"] is None
+
+
+def test_create_contact_with_photo(client, payload):
+    response = client.post(BASE, json={**payload, "photo": TINY_PNG_DATA_URL})
+    assert response.status_code == 201
+    assert response.json()["photo"] == TINY_PNG_DATA_URL
+
+
+def test_jpg_alias_is_stored_as_jpeg(client, payload):
+    raw = TINY_PNG_DATA_URL.split(",", 1)[1]
+    response = client.post(BASE, json={**payload, "photo": f"data:image/jpg;base64,{raw}"})
+    assert response.status_code == 201
+    assert response.json()["photo"] == f"data:image/jpeg;base64,{raw}"
+
+
+def test_create_rejects_non_image_photo(client, payload):
+    response = client.post(BASE, json={**payload, "photo": "https://example.com/ada.png"})
+    assert response.status_code == 422
+
+
+def test_create_rejects_svg_photo(client, payload):
+    response = client.post(
+        BASE,
+        json={**payload, "photo": "data:image/svg+xml;base64,PHN2Zy8+"},
+    )
+    assert response.status_code == 422
+
+
+def test_create_rejects_oversized_photo(client, payload):
+    blob = base64.b64encode(b"x" * (MAX_PHOTO_BYTES + 1)).decode()
+    response = client.post(BASE, json={**payload, "photo": f"data:image/png;base64,{blob}"})
+    assert response.status_code == 422
+
+
+def test_put_without_photo_clears_it(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": TINY_PNG_DATA_URL}).json()["id"]
+    response = client.put(
+        f"{BASE}/{contact_id}",
+        json={"first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com"},
+    )
+    assert response.status_code == 200
+    assert response.json()["photo"] is None
+
+
+def test_put_with_photo_keeps_it(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo": TINY_PNG_DATA_URL}).json()["id"]
+    response = client.put(
+        f"{BASE}/{contact_id}",
+        json={
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.com",
+            "photo": TINY_PNG_DATA_URL,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["photo"] == TINY_PNG_DATA_URL
+
+
+def test_patch_sets_and_clears_photo(client, payload):
+    contact_id = client.post(BASE, json=payload).json()["id"]
+    set_response = client.patch(f"{BASE}/{contact_id}", json={"photo": TINY_PNG_DATA_URL})
+    assert set_response.status_code == 200
+    assert set_response.json()["photo"] == TINY_PNG_DATA_URL
+
+    clear_response = client.patch(f"{BASE}/{contact_id}", json={"photo": None})
+    assert clear_response.status_code == 200
+    assert clear_response.json()["photo"] is None

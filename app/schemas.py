@@ -1,6 +1,11 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+
+from app.photo import MAX_PHOTO_DATA_URL_CHARS, normalize_photo
+
+PhotoDataUrl = Annotated[str | None, AfterValidator(normalize_photo)]
 
 
 class ContactBase(BaseModel):
@@ -69,6 +74,15 @@ class ContactBase(BaseModel):
         description="Free-form notes about the contact. No length limit.",
         examples=["Met at the SF hackathon."],
     )
+    photo: PhotoDataUrl = Field(
+        default=None,
+        max_length=MAX_PHOTO_DATA_URL_CHARS,
+        description=(
+            "Optional profile photo as a `data:image/...;base64,...` URL. "
+            "JPEG, PNG, GIF, or WebP only; decoded size must be 512 KB or smaller. "
+            "Omit or send null for no photo."
+        ),
+    )
 
 
 _FULL_EXAMPLE = {
@@ -84,6 +98,7 @@ _FULL_EXAMPLE = {
     "postal_code": "94105",
     "country": "USA",
     "notes": "Met at the SF hackathon.",
+    "photo": None,
 }
 _MINIMAL_EXAMPLE = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
 
@@ -134,6 +149,14 @@ class ContactUpdate(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
     country: str | None = Field(default=None, max_length=120, description="New country.")
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
+    photo: PhotoDataUrl = Field(
+        default=None,
+        max_length=MAX_PHOTO_DATA_URL_CHARS,
+        description=(
+            "New profile photo as a data URL, or null to clear. "
+            "JPEG, PNG, GIF, or WebP only; decoded size must be 512 KB or smaller."
+        ),
+    )
 
 
 class ContactRead(ContactBase):
