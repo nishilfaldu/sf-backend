@@ -42,7 +42,7 @@ def test_info_block_is_populated(spec):
 
 def test_tags_have_descriptions(spec):
     tags = {tag["name"]: tag.get("description", "") for tag in spec["tags"]}
-    assert set(tags) == {"contacts", "meta"}
+    assert set(tags) == {"contacts", "meta", "shares"}
     assert all(len(description) > 20 for description in tags.values())
 
 
@@ -70,6 +70,12 @@ def test_operation_ids_are_stable_and_unique(spec):
         "deleteContact",
         "healthCheck",
         "getRoot",
+        "getLanStatus",
+        "getQrSvg",
+        "createContactShare",
+        "getContactVCard",
+        "getShare",
+        "getShareVCard",
     }
 
 
@@ -77,6 +83,11 @@ def test_all_endpoints_are_present(spec):
     assert set(spec["paths"][CONTACTS_PATH]) == {"get", "post"}
     assert set(spec["paths"][ITEM_PATH]) == {"get", "put", "patch", "delete"}
     assert "/health" in spec["paths"]
+    assert "/api/v1/lan" in spec["paths"]
+    assert "/api/v1/qr" in spec["paths"]
+    assert "/api/v1/shares/{token}" in spec["paths"]
+    assert "/api/v1/contacts/{contact_id}/share" in spec["paths"]
+    assert "/api/v1/contacts/{contact_id}/vcard" in spec["paths"]
 
 
 @pytest.mark.parametrize(
