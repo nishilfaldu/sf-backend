@@ -74,6 +74,8 @@ CONTACTS_DATABASE_URL="sqlite+pysqlite:///./contacts.db" .venv/bin/python -m app
 ```
 
 The same code runs unchanged against Postgres (`postgresql+psycopg://...`).
+Startup creates missing tables and adds a `photo` column to an existing
+`contacts` table, so a file-backed database from before this field still works.
 
 ### Configuration
 
@@ -108,8 +110,13 @@ also read):
 
 ```
 first_name, last_name, email, phone, company, job_title,
-address, city, state, postal_code, country, notes
+address, city, state, postal_code, country, notes, photo
 ```
+
+`photo` is an optional `data:image/{jpeg,png,gif,webp};base64,...` URL.
+Decoded size must be 512 KB or smaller. Omit it, send `null`, or (on `PUT`)
+leave it out to clear. `PATCH` with `null` also clears; omitting `photo`
+from a `PATCH` leaves the stored value alone.
 
 Responses add `id`, `full_name`, `created_at`, and `updated_at` (UTC).
 

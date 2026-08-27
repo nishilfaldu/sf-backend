@@ -167,7 +167,7 @@ def test_create_contact_with_photo(client, payload):
 
 
 def test_jpg_alias_is_stored_as_jpeg(client, payload):
-    raw = TINY_PNG_DATA_URL.split(",", 1)[1]
+    raw = base64.b64encode(b"\xff\xd8\xff" + b"\x00" * 16).decode()
     response = client.post(BASE, json={**payload, "photo": f"data:image/jpg;base64,{raw}"})
     assert response.status_code == 201
     assert response.json()["photo"] == f"data:image/jpeg;base64,{raw}"
@@ -187,7 +187,20 @@ def test_create_rejects_svg_photo(client, payload):
 
 
 def test_create_rejects_oversized_photo(client, payload):
-    blob = base64.b64encode(b"x" * (MAX_PHOTO_BYTES + 1)).decode()
+    png_prefix = b"\x89PNG\r\n\x1a\n"
+    blob = base64.b64encode(png_prefix + b"\x00" * (MAX_PHOTO_BYTES + 1 - len(png_prefix))).decode()
+    response = client.post(BASE, json={**payload, "photo": f"data:image/png;base64,{blob}"})
+    assert response.status_code == 422
+
+
+def test_create_rejects_non_image_bytes_labeled_as_png(client, payload):
+    blob = base64.b64encode(b"Hello").decode()
+    response = client.post(BASE, json={**payload, "photo": f"data:image/png;base64,{blob}"})
+    assert response.status_code == 422
+
+
+def test_create_rejects_jpeg_bytes_labeled_as_png(client, payload):
+    blob = base64.b64encode(b"\xff\xd8\xff" + b"\x00" * 16).decode()
     response = client.post(BASE, json={**payload, "photo": f"data:image/png;base64,{blob}"})
     assert response.status_code == 422
 
@@ -226,3 +239,34 @@ def test_patch_sets_and_clears_photo(client, payload):
     clear_response = client.patch(f"{BASE}/{contact_id}", json={"photo": None})
     assert clear_response.status_code == 200
     assert clear_response.json()["photo"] is None
+
+
+def test_init_db_adds_photo_column_to_existing_table(client):
+    from sqlalchemy import inspect, text
+
+    from app.database import engine, init_db
+
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE contacts"))
+        connection.execute(
+            text(
+                "CREATE TABLE contacts ("
+                "id INTEGER PRIMARY KEY, "
+                "first_name VARCHAR(100) NOT NULL, "
+                "last_name VARCHAR(100) NOT NULL, "
+                "email VARCHAR(320) NOT NULL"
+                ")"
+            )
+        )
+
+    assert "photo" not in {
+        column["name"] for column in inspect(engine).get_columns("contacts")
+    }
+
+    init_db()
+
+    inspector = inspect(engine)
+    inspector.clear_cache()
+    columns = {column["name"] for column in inspector.get_columns("contacts")}
+    assert "photo" in columns
+    assert client.get("/health").status_code == 200

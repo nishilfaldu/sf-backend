@@ -47,4 +47,20 @@ def normalize_photo(value: str | None) -> str | None:
     if len(raw) > MAX_PHOTO_BYTES:
         raise ValueError("Photo must be 512 KB or smaller")
 
+    if not _matches_declared_subtype(raw, subtype):
+        raise ValueError("Photo bytes do not match the declared image type")
+
     return f"data:image/{subtype};base64,{payload}"
+
+
+def _matches_declared_subtype(raw: bytes, subtype: str) -> bool:
+    """True when the decoded payload's magic bytes match `subtype`."""
+    if subtype == "jpeg":
+        return raw.startswith(b"\xff\xd8\xff")
+    if subtype == "png":
+        return raw.startswith(b"\x89PNG\r\n\x1a\n")
+    if subtype == "gif":
+        return raw.startswith((b"GIF87a", b"GIF89a"))
+    if subtype == "webp":
+        return len(raw) >= 12 and raw.startswith(b"RIFF") and raw[8:12] == b"WEBP"
+    return False
